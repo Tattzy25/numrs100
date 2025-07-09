@@ -1,35 +1,16 @@
 import axios from 'axios';
 import { ApiError } from '../types';
 
-const GROQ_API_URL = 'https://api.groq.com/openai/v1';
+import { API_CONFIG, API_KEYS } from '../config/apiConfig';
 
-const handleApiError = (error: any): ApiError => {
-  if (error.response) {
-    return {
-      code: error.response.status.toString(),
-      message: error.response.data?.message || 'API request failed',
-      details: error.response.data,
-    };
-  } else if (error.request) {
-    return {
-      code: 'NETWORK_ERROR',
-      message: 'Network connection failed',
-      details: error.request,
-    };
-  } else {
-    return {
-      code: 'UNKNOWN_ERROR',
-      message: error.message || 'An unknown error occurred',
-      details: error,
-    };
-  }
-};
+import { handleApiError } from '../utils/apiError';
 
+// Speech-to-Text Service (Groq Whisper)
 export class GroqSTTService {
   private apiKey: string;
 
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
+  constructor() {
+    this.apiKey = API_KEYS.GROQ_API_KEY as string;
   }
 
   async transcribe(audioBlob: Blob, language?: string, responseFormat: string = 'json', url?: string, prompt?: string, temperature?: number, timestampGranularities?: string[]): Promise<any> {
@@ -49,7 +30,7 @@ export class GroqSTTService {
         timestampGranularities.forEach(g => formData.append('timestamp_granularities[]', g));
       }
       const response = await axios.post(
-        `${GROQ_API_URL}/audio/transcriptions`,
+        `${API_CONFIG.GROQ_API_URL}/audio/transcriptions`,
         formData,
         {
           headers: {

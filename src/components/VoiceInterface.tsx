@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Mic, MicOff, Send, RotateCcw, ArrowLeft, Copy, Share } from 'lucide-react';
 import { LanguageSelector } from './LanguageSelector';
 import { useTranslation } from '../hooks/useTranslation';
+import { useRealtime } from '../hooks/useRealtime';
 
 interface VoiceInterfaceProps {
   mode: 'host' | 'join' | 'solo';
@@ -26,6 +27,8 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
   // Set Spanish as default for fromLanguage and toLanguage if not provided
   const [fromLang, setFromLang] = useState(fromLanguage || 'es');
   const [toLang, setToLang] = useState(toLanguage || 'en');
+  const deeplApiKey = import.meta.env.VITE_DEEPL_API_KEY;
+  console.log('VoiceInterface: deeplApiKey', deeplApiKey);
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [translation, setTranslation] = useState('');
@@ -34,56 +37,60 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
   const [statusMessage, setStatusMessage] = useState(mode === 'solo' ? 'Say something or upload a file...' : 'Ready to translate...');
   const [audioLevel, setAudioLevel] = useState(0);
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [connectionStatus, setConnectionStatus] = useState(mode === 'solo' ? 'offline' : 'connected');
   const [generatedCode, setGeneratedCode] = useState('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const generateRoomCode = async () => {
     setIsGeneratingCode(true);
     setStatusMessage('Generating access code...');
-    
-    // Simulate 2-3 second delay
-    setTimeout(() => {
-      const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+    try {
+      // In a production environment, this would be an API call to your backend
+      // const response = await fetch('/api/generate-room-code', { method: 'POST' });
+      // const data = await response.json();
+      // const code = data.roomCode;
+
+      // Simulating a backend API call for demonstration
+      await new Promise(resolve => setTimeout(resolve, 2500)); // Simulate network delay
+      const code = Math.random().toString(36).substring(2, 8).toUpperCase(); // Still client-side for now
+
       setGeneratedCode(code);
       setShowCodeButton(false);
       setIsGeneratingCode(false);
       setStatusMessage('Room created successfully');
-    }, 2500);
+    } catch (error) {
+      setStatusMessage('Failed to generate room code');
+      setIsGeneratingCode(false);
+    }
   };
 
-  const handleEndSession = () => {
+  const handleEndSession = async () => {
+    if (mode === 'host' && roomCode) {
+      await sendMessage({
+        type: 'session_ended',
+        payload: {
+          roomCode: roomCode,
+          timestamp: Date.now(),
+        },
+        sender: 'host',
+        timestamp: Date.now(),
+      });
+    }
     setGeneratedCode('');
     setShowCodeButton(true);
     setStatusMessage('Session ended');
     setConnectionStatus('offline');
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file && file.type.startsWith('audio/')) {
-      setUploadedFile(file);
-      setStatusMessage('Processing uploaded file...');
-      setTimeout(() => {
-        setTranscript("This is from the uploaded audio file");
-        setStatusMessage('Transcribing...');
-        setTimeout(() => {
-          setTranslation("Esto es del archivo de audio subido");
-          setStatusMessage('Translation complete');
-        }, 1000);
-        setStatusMessage('File processed successfully');
-      }, 2000);
-    }
-  };
-  const [mediaStream, setMediaStream] = useState<MediaStream|null>(null);
-  const [audioContext, setAudioContext] = useState<AudioContext|null>(null);
-  const [analyser, setAnalyser] = useState<AnalyserNode|null>(null); // REMOVE if not used
-  const [sourceNode, setSourceNode] = useState<MediaStreamAudioSourceNode|null>(null); // REMOVE if not used
-  const [peerConnection, setPeerConnection] = useState<RTCPeerConnection|null>(null); // REMOVE if not used
-  const [rtcStream, setRtcStream] = useState<MediaStream|null>(null); // REMOVE if not used
+
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
+  const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
+  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
+  const [sourceNode, setSourceNode] = useState<MediaStreamAudioSourceNode | null>(null);
+  const [peerConnection, setPeerConnection] = useState<RTCPeerConnection | null>(null);
+  const [rtcStream, setRtcStream] = useState<MediaStream | null>(null);
   const cleanupAudio = useCallback(() => {
     if (mediaRecorderRef.current) {
       mediaRecorderRef.current.ondataavailable = null;
@@ -102,7 +109,7 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
     setSourceNode(null);
     setAudioLevel(0);
   }, [mediaStream, audioContext]);
-  
+
   useEffect(() => {
     return () => {
       cleanupAudio();
@@ -114,11 +121,12 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
       setPeerConnection(pc);
       setRtcStream(stream);
-      // For production, add signaling logic here for offer/answer exchange
-      // For now, local loopback for validation
+      // CRITICAL: In a production environment, this is where you'd implement signaling
+      // to exchange SDP offers/answers and ICE candidates with other peers via a signaling server (e.g., WebSockets).
+      // Without this, WebRTC connections cannot be established between users.
+      // TODO: Implement production signaling logic for offer/answer exchange
       pc.ontrack = (event) => {
         // Attach to audio element if needed
-        // Example: remoteAudioRef.current.srcObject = event.streams[0];
       };
     } catch (err) {
       setStatusMessage('WebRTC initialization failed');
@@ -172,7 +180,6 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
         mediaRecorder.start();
         setIsRecording(true);
       } catch (error) {
-        console.error('Error accessing microphone:', error);
         setStatusMessage('Microphone access denied');
         cleanupAudio();
       }
@@ -187,6 +194,9 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
     progress
   } = useTranslation();
 
+  // Ably realtime integration
+  const { sendMessage } = useRealtime({ ablyApiKey: import.meta.env.VITE_ABLY_API_KEY });
+
   const processAudio = async (audioBlob: Blob) => {
     setIsProcessing(true);
     setStatusMessage('Transcribing speech...');
@@ -195,6 +205,21 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
       setTranscript(result.original);
       setTranslation(result.translated);
       setStatusMessage('Translation complete');
+      // Host mode: send translation/audio to room via Ably
+      if (mode === 'host' && roomCode) {
+        await sendMessage({
+          type: 'text',
+          payload: {
+            transcript: result.original,
+            translation: result.translated,
+            fromLanguage: fromLang,
+            toLanguage: toLang,
+            timestamp: Date.now(),
+          },
+          sender: 'host',
+          timestamp: Date.now(),
+        });
+      }
     } else {
       setTranscript('');
       setTranslation('');
@@ -203,19 +228,34 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
     setIsProcessing(false);
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     setStatusMessage(mode === 'solo' ? 'Playing translation...' : 'Bridgit is sending...');
-    if (mode !== 'solo') {
-      console.log('Sending to room:', roomCode);
-    }
-    
-    console.log('Playing TTS for:', translation);
-    
-    setTimeout(() => {
+    if (mode === 'solo') {
+      if (translation) {
+        await playAudio(translation);
+      }
       setTranscript('');
       setTranslation('');
-      setStatusMessage(mode === 'solo' ? 'Say something or upload a file...' : 'Ready to translate...');
-    }, 2000);
+      setStatusMessage('Say something...');
+    } else {
+      if (translation && roomCode) {
+        await sendMessage({
+          type: 'text',
+          payload: {
+            transcript: transcript,
+            translation: translation,
+            fromLanguage: fromLang,
+            toLanguage: toLang,
+            timestamp: Date.now(),
+          },
+          sender: mode,
+          timestamp: Date.now(),
+        });
+      }
+      setTranscript('');
+      setTranslation('');
+      setStatusMessage('Ready to translate...');
+    }
   };
 
   const handleReRecord = () => {
@@ -240,7 +280,7 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
           url: window.location.href
         });
       } catch (error) {
-        console.log('Error sharing:', error);
+        setStatusMessage('Error sharing room code');
       }
     } else {
       copyRoomCode();
@@ -259,7 +299,7 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
             <ArrowLeft className="h-5 w-5" />
             <span>Back</span>
           </button>
-          
+
           <div className="text-center">
             <h1 className="text-2xl font-bold bg-gradient-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">
               {mode.toUpperCase()} MODE
@@ -268,11 +308,10 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
               <button
                 onClick={generateRoomCode}
                 disabled={isGeneratingCode}
-                className={`mt-2 px-6 py-2 rounded-xl font-semibold transition-all duration-300 ${
-                  isGeneratingCode
-                    ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white shadow-lg shadow-purple-500/40'
-                }`}
+                className={`mt-2 px-6 py-2 rounded-xl font-semibold transition-all duration-300 ${isGeneratingCode
+                  ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                  : 'bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white shadow-lg shadow-purple-500/40'
+                  }`}
               >
                 {isGeneratingCode ? 'Generating...' : 'GET ACCESS CODE'}
               </button>
@@ -304,7 +343,23 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
                   type="text"
                   placeholder="Enter message to broadcast to joined users"
                   className="mt-2 w-full max-w-xs bg-black border border-purple-500/30 rounded-xl px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-purple-400/50 text-center text-base font-mono tracking-wide shadow-lg shadow-purple-500/10"
-                  // Add onChange/onKeyDown logic as needed for your use case
+                  value={statusMessage === 'Room created successfully' ? '' : statusMessage}
+                  onChange={(e) => setStatusMessage(e.target.value)}
+                  onKeyDown={async (e) => {
+                    if (e.key === 'Enter' && statusMessage && roomCode) {
+                      await sendMessage({
+                        type: 'broadcast',
+                        payload: {
+                          message: statusMessage,
+                          sender: 'host',
+                          timestamp: Date.now(),
+                        },
+                        sender: 'host',
+                        timestamp: Date.now(),
+                      });
+                      setStatusMessage('');
+                    }
+                  }}
                 />
               </div>
             )}
@@ -336,6 +391,8 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
               setFromLang(lang);
               onLanguageChange.setFromLanguage(lang);
             }}
+            apiKey={deeplApiKey}
+            type="source"
           />
           <LanguageSelector
             label="To"
@@ -344,50 +401,27 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
               setToLang(lang);
               onLanguageChange.setToLanguage(lang);
             }}
+            apiKey={deeplApiKey}
+            type="target"
           />
         </div>
       </div>
 
       {/* Voice Interface */}
-      <div className="max-w-2xl mx-auto">
-        {/* File Upload for Solo Mode */}
-        {mode === 'solo' && (
-          <div className="mb-6">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="audio/*"
-              onChange={handleFileUpload}
-              className="hidden"
-              title="Upload audio file"
-              placeholder="Upload audio file"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full bg-black border border-purple-500/30 rounded-xl p-4 text-gray-300 hover:text-white hover:bg-gray-900/60 transition-all duration-300 shadow-lg shadow-purple-500/10"
-            >
-              📁 Upload Audio File for Translation
-            </button>
-            {uploadedFile && (
-              <p className="text-sm text-purple-400 mt-2">
-                Uploaded: {uploadedFile.name}
-              </p>
-            )}
-          </div>
-        )}
+      <div className="max-w-2xl mx-auto px-2 sm:px-4 md:px-6">
+        {/* File upload removed for production. Mobile-first padding added. */}
 
         {/* Transcript Display */}
         <div className="mb-8">
-          <div className="bg-gray-900/60 backdrop-blur-sm border border-purple-500/20 rounded-2xl p-6 mb-4 shadow-xl shadow-purple-500/10">
-            <h3 className="text-sm font-medium text-gray-400 mb-2">Original</h3>
-            <p className="text-lg text-white min-h-[3rem] flex items-center">
-              {transcript || (mode === 'solo' ? 'Click the microphone or upload a file to start...' : 'Click the microphone to start speaking...')}
+          <div className="bg-gray-900/60 backdrop-blur-sm border border-purple-500/20 rounded-2xl p-4 sm:p-6 mb-4 shadow-xl shadow-purple-500/10">
+            <h3 className="text-xs sm:text-sm font-medium text-gray-400 mb-2">Original</h3>
+            <p className="text-base sm:text-lg text-white min-h-[2.5rem] flex items-center">
+              {transcript || 'Click the microphone to start speaking...'}
             </p>
           </div>
-          
-          <div className="bg-gray-900/60 backdrop-blur-sm border border-purple-500/20 rounded-2xl p-6 shadow-xl shadow-purple-500/10">
-            <h3 className="text-sm font-medium text-gray-400 mb-2">Translation</h3>
-            <p className="text-lg text-white min-h-[3rem] flex items-center">
+          <div className="bg-gray-900/60 backdrop-blur-sm border border-purple-500/20 rounded-2xl p-4 sm:p-6 shadow-xl shadow-purple-500/10">
+            <h3 className="text-xs sm:text-sm font-medium text-gray-400 mb-2">Translation</h3>
+            <p className="text-base sm:text-lg text-white min-h-[2.5rem] flex items-center">
               {translation || statusMessage}
             </p>
           </div>
@@ -399,32 +433,31 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
           <button
             onClick={handleMicToggle}
             disabled={isProcessing}
-            className={`relative group w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 overflow-hidden ${
-              isRecording
-                ? 'bg-gradient-to-br from-red-500 to-red-600 shadow-2xl shadow-red-500/50 scale-110'
-                : 'bg-gradient-to-br from-purple-500 to-purple-700 shadow-2xl shadow-purple-500/50 hover:scale-105 hover:shadow-purple-400/60'
-            } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+            className={`relative group w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 overflow-hidden ${isRecording
+              ? 'bg-gradient-to-br from-red-500 to-red-600 shadow-2xl shadow-red-500/50 scale-110'
+              : 'bg-gradient-to-br from-purple-500 to-purple-700 shadow-2xl shadow-purple-500/50 hover:scale-105 hover:shadow-purple-400/60'
+              } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             <div className="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent rounded-full" />
-            
+
             {/* Animated Voice Detection Waves */}
             {isRecording && (
               <>
-                <div 
+                <div
                   className="absolute inset-0 rounded-full border-4 animate-pulse"
                   style={{
                     borderColor: `rgba(${Math.floor(147 + audioLevel)}, ${Math.floor(51 + audioLevel * 2)}, ${Math.floor(234 + audioLevel)}, 0.6)`,
                     transform: `scale(${1 + audioLevel / 500})`
                   }}
                 />
-                <div 
+                <div
                   className="absolute inset-2 rounded-full border-2 animate-pulse"
                   style={{
                     borderColor: `rgba(${Math.floor(255 + audioLevel)}, ${Math.floor(215 - audioLevel)}, ${Math.floor(0 + audioLevel * 2)}, 0.4)`,
                     transform: `scale(${1 + audioLevel / 300})`
                   }}
                 />
-                <div 
+                <div
                   className="absolute inset-4 rounded-full border-2 animate-pulse"
                   style={{
                     borderColor: `rgba(${Math.floor(168 + audioLevel * 2)}, ${Math.floor(85 + audioLevel)}, ${Math.floor(247)}, 0.8)`,
@@ -433,7 +466,7 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
                 />
               </>
             )}
-            
+
             {isRecording ? (
               <MicOff className="h-10 w-10 text-white z-10" />
             ) : (
@@ -451,7 +484,7 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
                 <RotateCcw className="h-5 w-5" />
                 <span>Re-record</span>
               </button>
-              
+
               <button
                 onClick={handleSend}
                 className="flex items-center space-x-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 px-6 py-3 rounded-xl transition-all duration-300 shadow-lg shadow-purple-500/30 hover:shadow-purple-400/40"
@@ -470,7 +503,7 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
                 <span className="text-sm text-gray-400">Processing...</span>
               </div>
             )}
-            
+
             {isRecording && (
               <p className="text-sm text-red-400 animate-pulse drop-shadow-lg">
                 🔴 Recording... Click mic to stop
@@ -483,4 +516,4 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
   );
 };
 
-const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }; // For production, consider dedicated STUN/TURN servers for robustness.

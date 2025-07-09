@@ -18,11 +18,13 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-query": "^3.39.3",
+    "react-syntax-highlighter": "^15.6.1",
     "uuid": "^11.1.0",
     "zustand": "^5.0.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",
+    "@pinegrow/piny-vite": "^1.0.10",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",

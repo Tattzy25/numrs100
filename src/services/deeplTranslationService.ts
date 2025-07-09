@@ -1,8 +1,9 @@
 import axios from 'axios';
-import { ApiError } from '../types';
+import { ApiError, TranslationResult } from '../types';
 
-const DEEPL_API_URL = 'https://api-free.deepl.com/v2';
+import { API_CONFIG, API_KEYS } from '../config/apiConfig';
 
+// Error handling utility
 const handleApiError = (error: any): ApiError => {
   if (error.response) {
     return {
@@ -25,6 +26,7 @@ const handleApiError = (error: any): ApiError => {
   }
 };
 
+// Translation Service (DeepL)
 export class DeepLTranslationService {
   private apiKey: string;
 
@@ -32,20 +34,37 @@ export class DeepLTranslationService {
     this.apiKey = apiKey;
   }
 
-  async translate(text: string, targetLang: string, sourceLang?: string, glossaryId?: string): Promise<string> {
+  async getSupportedLanguages(type: 'source' | 'target'): Promise<Array<{ code: string; name: string }>> {
     try {
-      const requestBody: any = {
-        text: [text],
-        target_lang: targetLang.toUpperCase(),
-        source_lang: sourceLang?.toUpperCase(),
-        formality: 'less',
-      };
-      if (glossaryId) {
-        requestBody.glossary_id = glossaryId;
-      }
+      const response = await axios.get(
+        `${API_CONFIG.DEEPL_API_URL}/languages`,
+        {
+          headers: {
+            'Authorization': `DeepL-Auth-Key ${this.apiKey}`,
+          },
+          params: {
+            type: type,
+          },
+        }
+      );
+      return response.data.map((lang: any) => ({
+        code: lang.language.toLowerCase(),
+        name: lang.name,
+      }));
+    } catch (error) {
+      throw handleApiError(error);
+    }
+  }
+
+  async translate(text: string, targetLang: string, sourceLang?: string): Promise<string> {
+    try {
       const response = await axios.post(
-        `${DEEPL_API_URL}/translate`,
-        requestBody,
+        `${API_CONFIG.DEEPL_API_URL}/translate`,
+        {
+          text: [text],
+          target_lang: targetLang.toUpperCase(),
+          source_lang: sourceLang?.toUpperCase(),
+        },
         {
           headers: {
             'Authorization': `DeepL-Auth-Key ${this.apiKey}`,
@@ -53,6 +72,7 @@ export class DeepLTranslationService {
           },
         }
       );
+
       return response.data.translations[0].text;
     } catch (error) {
       throw handleApiError(error);
@@ -62,7 +82,7 @@ export class DeepLTranslationService {
   async detectLanguage(text: string): Promise<string> {
     try {
       const response = await axios.post(
-        `${DEEPL_API_URL}/translate`,
+        `${API_CONFIG.DEEPL_API_URL}/translate`,
         {
           text: [text],
           target_lang: 'EN',
@@ -74,24 +94,8 @@ export class DeepLTranslationService {
           },
         }
       );
-      return response.data.translations[0].detected_source_language.toLowerCase();
-    } catch (error) {
-      throw handleApiError(error);
-    }
-  }
 
-  async getSupportedLanguages(type: 'source' | 'target' = 'target'): Promise<Array<{ code: string; name: string }>> {
-    try {
-      const response = await axios.get(
-        `${DEEPL_API_URL}/languages?type=${type}`,
-        {
-          headers: {
-            'Authorization': `DeepL-Auth-Key ${this.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-      return response.data.map((lang: any) => ({ code: lang.language.toLowerCase(), name: lang.name }));
+      return response.data.translations[0].detected_source_language.toLowerCase();
     } catch (error) {
       throw handleApiError(error);
     }
