@@ -1,0 +1,62 @@
+Create IVC voice
+POST
+
+https://api.elevenlabs.io
+/v1/voices/add
+POST
+/v1/voices/add
+
+TypeScript
+
+import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
+import * as fs from "fs";
+const client = new ElevenLabsClient({ apiKey: "YOUR_API_KEY" });
+await client.voices.ivc.create({
+    files: [fs.createReadStream("/path/to/your/file")],
+    name: "name"
+});
+Try it
+
+200
+Successful
+
+{
+  "voice_id": "c38kUX8pkfYO2kHyqfFy",
+  "requires_verification": false
+}
+Create a voice clone and add it to your Voices
+Headers
+xi-api-key
+string
+Required
+Request
+This endpoint expects a multipart form with multiple files.
+name
+string
+Required
+The name that identifies this voice. This will be displayed in the dropdown of the website.
+files
+files
+Required
+A list of file paths to audio recordings intended for voice cloning.
+remove_background_noise
+boolean
+Optional
+Defaults to false
+If set will remove background noise for voice samples using our audio isolation model. If the samples do not include background noise, it can make the quality worse.
+description
+string or null
+Optional
+A description of the voice.
+labels
+string or null
+Optional
+Serialized labels dictionary for the voice.
+Response
+Successful Response
+voice_id
+string
+The ID of the newly created voice.
+requires_verification
+boolean
+Whether the voice requires verification

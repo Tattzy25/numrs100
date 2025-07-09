@@ -1,0 +1,39 @@
+Delete voice
+DELETE
+
+https://api.elevenlabs.io
+/v1/voices/:voice_id
+DELETE
+/v1/voices/:voice_id
+
+TypeScript
+
+import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
+const client = new ElevenLabsClient({ apiKey: "YOUR_API_KEY" });
+await client.voices.delete("21m00Tcm4TlvDq8ikWAM");
+Try it
+
+200
+Deleted
+
+{
+  "status": "ok"
+}
+Deletes a voice by its ID.
+Path parameters
+voice_id
+string
+Required
+ID of the voice to be used. You can use the Get voices endpoint list all the available voices.
+
+Headers
+xi-api-key
+string
+Required
+Response
+Successful Response
+status
+string
+The status of the voice deletion request. If the request was successful, the status will be 'ok'. Otherwise an error message with status 500 will be returned.
+Errors
+
