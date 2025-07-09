@@ -2,11 +2,6 @@ import axios from 'axios';
 import { ApiError } from '../types';
 import { Realtime } from 'ably';
 
-// API Configuration
-const API_CONFIG = {
-  ABLY_API_URL: 'https://rest.ably.io',
-};
-
 // Error handling utility
 const handleApiError = (error: any): ApiError => {
   if (error.response) {

@@ -1,4 +1,4 @@
-import axios from 'axios';
+// Remove unused axios import since it's not being used in the code
 import { ApiError, TranslationResult } from '../types';
 
 // API Configuration
@@ -116,7 +116,7 @@ export class AudioProcessor {
 
       this.mediaRecorder.start(1000); // Collect data every second
     } catch (error) {
-      throw new Error(`Failed to start recording: ${error.message}`);
+      throw new Error(`Failed to start recording: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 

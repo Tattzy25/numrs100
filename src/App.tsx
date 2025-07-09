@@ -8,6 +8,7 @@ import { LanguageLab } from './components/LanguageLab';
 import { Settings } from './components/Settings';
 import { JoinRoom } from './components/JoinRoom';
 import { useAppStore } from './store/useAppStore';
+import { SUPPORTED_LANGUAGES } from './config/supportedLanguages';
 
 export type AppMode = 'menu' | 'host' | 'join' | 'solo' | 'voicelab' | 'languagelab' | 'settings';
 
@@ -24,8 +25,23 @@ function App() {
     lastError,
     setError 
   } = useAppStore();
-  
+
   const toast = useToast();
+
+  React.useEffect(() => {
+    const validateLanguage = (langCode: string | undefined, setter: (lang: string) => void, langType: string) => {
+      if (langCode) {
+        const found = SUPPORTED_LANGUAGES.some(lang => lang.code === langCode);
+        if (!found) {
+          toast.info(`Unsupported ${langType} language: ${langCode}. Coming soon!`);
+          setter('EN-US'); // Set a default supported language
+        }
+      }
+    };
+
+    validateLanguage(fromLanguage, setFromLanguage, 'source');
+    validateLanguage(toLanguage, setToLanguage, 'target');
+  }, [fromLanguage, toLanguage, setFromLanguage, setToLanguage, toast]);
 
   // Show error toasts
   React.useEffect(() => {

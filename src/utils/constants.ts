@@ -29,7 +29,7 @@ export const SUPPORTED_LANGUAGES: Language[] = [
 
 export const API_ENDPOINTS = {
   GROQ: 'https://api.groq.com/openai/v1',
-  DEEPL: 'https://api-free.deepl.com/v2',
+  DEEPL_API_URL: '/api/proxy/deepl',
   ELEVENLABS: 'https://api.elevenlabs.io/v1',
   ABLY: 'https://rest.ably.io',
 } as const;
@@ -45,7 +45,7 @@ export const AUDIO_CONSTRAINTS = {
 export const RECORDING_LIMITS = {
   MIN_DURATION: 1, // seconds
   MAX_DURATION: 300, // 5 minutes
-  VOICE_CLONE_MIN_DURATION: 30, // seconds for voice cloning
+  VOICE_CLONE_MIN_DURATION: 60// seconds for voice cloning
 } as const;
 
 export const ERROR_MESSAGES = {

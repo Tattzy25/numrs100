@@ -2,16 +2,13 @@ import { STORAGE_KEYS } from './constants';
 
 export class SecureStorage {
   private static encrypt(data: string): string {
-    // Simple base64 encoding for demo - use proper encryption in production
-    return btoa(data);
+    // For development, no encryption is applied. In production, implement strong encryption.
+    return data;
   }
 
   private static decrypt(data: string): string {
-    try {
-      return atob(data);
-    } catch {
-      return data; // Fallback for unencrypted data
-    }
+    // For development, no decryption is applied. In production, implement strong decryption.
+    return data;
   }
 
   static setItem(key: string, value: any): void {

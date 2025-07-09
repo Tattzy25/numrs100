@@ -1,15 +1,9 @@
 import { useState, useCallback } from 'react';
-import { useAppStore } from '../store/useAppStore';
-import { GroqSTTService } from '../services/groqSTTService';
-import { DeepLTranslationService } from '../services/deeplTranslationService';
-import { ElevenLabsTTSService } from '../services/elevenLabsTTSService';
-import { TranslationResult } from '../types';
-
-interface UseTranslationOptions {
-  groqApiKey?: string;
-  deeplApiKey?: string;
-  elevenlabsApiKey?: string;
-}
+import { useAppStore } from "../../store/useAppStore";
+import { GroqSTTService } from "../../services/groqSTTService";
+import { DeepLTranslationService } from "../../services/deeplTranslationService";
+import { ElevenLabsTTSService } from "../../services/elevenLabsTTSService";
+import { TranslationResult } from "../../types";
 
 export const useTranslation = () => {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -26,19 +20,15 @@ export const useTranslation = () => {
     setError,
   } = useAppStore();
 
-  // Get API keys from env
-  const deeplApiKey = import.meta.env.VITE_DEEPL_API_KEY;
   const elevenlabsApiKey = import.meta.env.VITE_ELEVENLABS_API_KEY;
   const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
 
   const sttService = groqApiKey ? new GroqSTTService(groqApiKey) : null;
-  const translationService = deeplApiKey ? new DeepLTranslationService(deeplApiKey) : null;
+  const translationService = new DeepLTranslationService();
   const ttsService = elevenlabsApiKey ? new ElevenLabsTTSService(elevenlabsApiKey) : null;
 
-  // Helper to get fallback/default voice
   const getVoiceId = () => {
     if (selectedVoice) return selectedVoice.id;
-    // Fallback order: AVI, HOPE, ADAM, ANTONI, JESSICA, SARAH
     const fallbackOrder = [
       import.meta.env.VITE_ELEVENLABS_VOICE_AVI_MALE_DEFAULT,
       import.meta.env.VITE_ELEVENLABS_VOICE_HOPE_FEMALE_DEFAULT,
@@ -50,7 +40,6 @@ export const useTranslation = () => {
     for (const vid of fallbackOrder) {
       if (vid) return vid;
     }
-    // If none found, use first saved voice
     if (savedVoices.length > 0) return savedVoices[0].id;
     return undefined;
   };
@@ -63,9 +52,13 @@ export const useTranslation = () => {
     setIsProcessing(true);
     setProgress(0);
     setError(null);
+    console.log('useTranslation: Starting processAudio...');
     try {
+      console.log('useTranslation: processAudio received audioBlob:', audioBlob.type, audioBlob.size);
+
       setCurrentStep('Transcribing speech...');
       setProgress(25);
+      console.log('useTranslation: Calling STT service...');
       const transcript = await sttService.transcribe(
         audioBlob,
         settings.translation.autoDetect ? undefined : fromLanguage
@@ -73,24 +66,31 @@ export const useTranslation = () => {
       if (!transcript.trim()) {
         throw new Error('No speech detected in audio');
       }
+      console.log('useTranslation: STT transcription complete. Transcript length:', transcript.length);
       setCurrentStep('Translating text...');
       setProgress(50);
+      console.log('useTranslation: Calling DeepL translation service...');
       const translatedText = await translationService.translate(
         transcript,
         toLanguage,
         fromLanguage
       );
       let audioUrl: string | undefined;
+      console.log('useTranslation: DeepL translation complete. Translated text length:', translatedText.length);
       if (ttsService) {
         setCurrentStep('Generating speech...');
         setProgress(75);
+        console.log('useTranslation: Calling ElevenLabs TTS service...');
         const voiceId = getVoiceId();
         if (!voiceId) throw new Error('No valid voice ID available');
         const audioBlob = await ttsService.synthesize(translatedText, voiceId);
         audioUrl = URL.createObjectURL(audioBlob);
+        console.log('useTranslation: ElevenLabs TTS synthesis complete.');
+        playAudio(audioUrl);
       }
       setCurrentStep('Complete');
       setProgress(100);
+      console.log('useTranslation: processAudio completed successfully.');
       const result: TranslationResult = {
         original: transcript,
         translated: translatedText,
@@ -104,9 +104,11 @@ export const useTranslation = () => {
       }
       return result;
     } catch (error: any) {
+      console.error('useTranslation: Error during processAudio:', error);
       setError(error.message || 'Translation failed');
       return null;
     } finally {
+      console.log('useTranslation: processAudio finally block executed. Setting isProcessing to false.');
       setIsProcessing(false);
       setCurrentStep('');
       setProgress(0);

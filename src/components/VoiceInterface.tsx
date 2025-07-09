@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Mic, MicOff, Send, RotateCcw, ArrowLeft, Copy, Share } from 'lucide-react';
-import { LanguageSelector } from './LanguageSelector';
-import { useTranslation } from '../hooks/useTranslation';
+import { LanguageSelector } from './language/LanguageSelector';
+import { useTranslation } from '../hooks/translation/useTranslation';
 import { useRealtime } from '../hooks/useRealtime';
+import { useVoiceActivityDetection } from './vad/useVoiceActivityDetection';
 
 interface VoiceInterfaceProps {
   mode: 'host' | 'join' | 'solo';
@@ -24,38 +25,29 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
   onLanguageChange,
   onBack
 }) => {
-  // Set Spanish as default for fromLanguage and toLanguage if not provided
   const [fromLang, setFromLang] = useState(fromLanguage || 'es');
   const [toLang, setToLang] = useState(toLanguage || 'en');
-  const deeplApiKey = import.meta.env.VITE_DEEPL_API_KEY;
-  console.log('VoiceInterface: deeplApiKey', deeplApiKey);
-  const [isRecording, setIsRecording] = useState(false);
+
   const [transcript, setTranscript] = useState('');
   const [translation, setTranslation] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
   const [showCodeButton, setShowCodeButton] = useState(mode === 'host');
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
   const [statusMessage, setStatusMessage] = useState(mode === 'solo' ? 'Say something or upload a file...' : 'Ready to translate...');
+  const [hostMessage, setHostMessage] = useState('');
+
   const [audioLevel, setAudioLevel] = useState(0);
   const [connectionStatus, setConnectionStatus] = useState(mode === 'solo' ? 'offline' : 'connected');
   const [generatedCode, setGeneratedCode] = useState('');
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
 
   const generateRoomCode = async () => {
     setIsGeneratingCode(true);
     setStatusMessage('Generating access code...');
 
     try {
-      // In a production environment, this would be an API call to your backend
-      // const response = await fetch('/api/generate-room-code', { method: 'POST' });
-      // const data = await response.json();
-      // const code = data.roomCode;
-
-      // Simulating a backend API call for demonstration
-      await new Promise(resolve => setTimeout(resolve, 2500)); // Simulate network delay
-      const code = Math.random().toString(36).substring(2, 8).toUpperCase(); // Still client-side for now
-
+      const response = await fetch('/api/generate-room-code', { method: 'POST' });
+      if (!response.ok) throw new Error('Failed to generate room code');
+      const data = await response.json();
+      const code = data.roomCode;
       setGeneratedCode(code);
       setShowCodeButton(false);
       setIsGeneratingCode(false);
@@ -84,156 +76,50 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
     setConnectionStatus('offline');
   };
 
+  const { processAudio, isProcessing: isTranslationProcessing, currentStep, progress } = useTranslation();
 
-  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
-  const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
-  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
-  const [sourceNode, setSourceNode] = useState<MediaStreamAudioSourceNode | null>(null);
-  const [peerConnection, setPeerConnection] = useState<RTCPeerConnection | null>(null);
-  const [rtcStream, setRtcStream] = useState<MediaStream | null>(null);
-  const cleanupAudio = useCallback(() => {
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.ondataavailable = null;
-      mediaRecorderRef.current.onstop = null;
-      mediaRecorderRef.current = null;
-    }
-    if (mediaStream) {
-      mediaStream.getTracks().forEach(track => track.stop());
-      setMediaStream(null);
-    }
-    if (audioContext) {
-      audioContext.close();
-      setAudioContext(null);
-    }
-    setAnalyser(null);
-    setSourceNode(null);
-    setAudioLevel(0);
-  }, [mediaStream, audioContext]);
+  const { isVADActive, isRecording, startListening, stopRecording } = useVoiceActivityDetection({
+    onVoiceStart: () => {
+      setStatusMessage('Recording...');
+      setTranscript('');
+      setTranslation('');
+    },
+    onVoiceEnd: async (audioBlob) => {
+      setStatusMessage('Processing audio...');
+      await processAudio(audioBlob);
+    },
+    onAudioLevelChange: setAudioLevel,
+  });
 
   useEffect(() => {
-    return () => {
-      cleanupAudio();
-    };
-  }, [cleanupAudio]);
-  const startWebRTC = useCallback(async (stream: MediaStream) => {
-    try {
-      const pc = new RTCPeerConnection(rtcConfig);
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
-      setPeerConnection(pc);
-      setRtcStream(stream);
-      // CRITICAL: In a production environment, this is where you'd implement signaling
-      // to exchange SDP offers/answers and ICE candidates with other peers via a signaling server (e.g., WebSockets).
-      // Without this, WebRTC connections cannot be established between users.
-      // TODO: Implement production signaling logic for offer/answer exchange
-      pc.ontrack = (event) => {
-        // Attach to audio element if needed
-      };
-    } catch (err) {
-      setStatusMessage('WebRTC initialization failed');
+    if (isTranslationProcessing) {
+      setStatusMessage(currentStep || 'Processing...');
+    } else if (!isRecording && !isVADActive) {
+      setStatusMessage(mode === 'solo' ? 'Say something or upload a file...' : 'Ready to translate...');
+    } else if (isVADActive && !isRecording) {
+      setStatusMessage('Bridgit is listening for your voice...');
     }
-  }, []);
+  }, [isTranslationProcessing, currentStep, isRecording, isVADActive, mode]);
+
   const handleMicToggle = async () => {
+    if (isTranslationProcessing) {
+      setStatusMessage('Please wait for current processing to finish.');
+      return;
+    }
     if (isRecording) {
-      if (mediaRecorderRef.current) {
-        mediaRecorderRef.current.stop();
-      }
-      setIsRecording(false);
-      setStatusMessage('Processing audio...');
-    } else {
-      try {
-        setStatusMessage('Bridgit is listening...');
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        setMediaStream(stream);
-        await startWebRTC(stream);
-        const context = new AudioContext();
-        setAudioContext(context);
-        const analyserNode = context.createAnalyser();
-        setAnalyser(analyserNode);
-        const source = context.createMediaStreamSource(stream);
-        setSourceNode(source);
-        source.connect(analyserNode);
-        const dataArray = new Uint8Array(analyserNode.frequencyBinCount);
-        let rafId: number;
-        const updateAudioLevel = () => {
-          if (isRecording) {
-            analyserNode.getByteFrequencyData(dataArray);
-            const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-            setAudioLevel(average);
-            rafId = requestAnimationFrame(updateAudioLevel);
-          }
-        };
-        rafId = requestAnimationFrame(updateAudioLevel);
-        const mediaRecorder = new MediaRecorder(stream);
-        mediaRecorderRef.current = mediaRecorder;
-        audioChunksRef.current = [];
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            audioChunksRef.current.push(event.data);
-          }
-        };
-        mediaRecorder.onstop = async () => {
-          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          await processAudio(audioBlob);
-          cleanupAudio();
-          cancelAnimationFrame(rafId);
-        };
-        mediaRecorder.start();
-        setIsRecording(true);
-      } catch (error) {
-        setStatusMessage('Microphone access denied');
-        cleanupAudio();
-      }
+      stopRecording();
+    }
+    else {
+      startListening();
     }
   };
-
-  const {
-    processAudio: pipelineProcessAudio,
-    playAudio,
-    isProcessing: pipelineProcessing,
-    currentStep,
-    progress
-  } = useTranslation();
 
   // Ably realtime integration
   const { sendMessage } = useRealtime({ ablyApiKey: import.meta.env.VITE_ABLY_API_KEY });
 
-  const processAudio = async (audioBlob: Blob) => {
-    setIsProcessing(true);
-    setStatusMessage('Transcribing speech...');
-    const result = await pipelineProcessAudio(audioBlob);
-    if (result) {
-      setTranscript(result.original);
-      setTranslation(result.translated);
-      setStatusMessage('Translation complete');
-      // Host mode: send translation/audio to room via Ably
-      if (mode === 'host' && roomCode) {
-        await sendMessage({
-          type: 'text',
-          payload: {
-            transcript: result.original,
-            translation: result.translated,
-            fromLanguage: fromLang,
-            toLanguage: toLang,
-            timestamp: Date.now(),
-          },
-          sender: 'host',
-          timestamp: Date.now(),
-        });
-      }
-    } else {
-      setTranscript('');
-      setTranslation('');
-      setStatusMessage('Transcription or translation failed');
-    }
-    setIsProcessing(false);
-  };
-
   const handleSend = async () => {
     setStatusMessage(mode === 'solo' ? 'Playing translation...' : 'Bridgit is sending...');
     if (mode === 'solo') {
-      if (translation) {
-        await playAudio(translation);
-      }
       setTranscript('');
       setTranslation('');
       setStatusMessage('Say something...');
@@ -343,21 +229,21 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
                   type="text"
                   placeholder="Enter message to broadcast to joined users"
                   className="mt-2 w-full max-w-xs bg-black border border-purple-500/30 rounded-xl px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-purple-400/50 text-center text-base font-mono tracking-wide shadow-lg shadow-purple-500/10"
-                  value={statusMessage === 'Room created successfully' ? '' : statusMessage}
-                  onChange={(e) => setStatusMessage(e.target.value)}
+                  value={hostMessage}
+                  onChange={(e) => setHostMessage(e.target.value)}
                   onKeyDown={async (e) => {
-                    if (e.key === 'Enter' && statusMessage && roomCode) {
+                    if (e.key === 'Enter' && hostMessage && roomCode) {
                       await sendMessage({
                         type: 'broadcast',
                         payload: {
-                          message: statusMessage,
+                          message: hostMessage,
                           sender: 'host',
                           timestamp: Date.now(),
                         },
                         sender: 'host',
                         timestamp: Date.now(),
                       });
-                      setStatusMessage('');
+                      setHostMessage("");
                     }
                   }}
                 />
@@ -391,8 +277,6 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
               setFromLang(lang);
               onLanguageChange.setFromLanguage(lang);
             }}
-            apiKey={deeplApiKey}
-            type="source"
           />
           <LanguageSelector
             label="To"
@@ -401,8 +285,6 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
               setToLang(lang);
               onLanguageChange.setToLanguage(lang);
             }}
-            apiKey={deeplApiKey}
-            type="target"
           />
         </div>
       </div>
@@ -432,11 +314,14 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
           {/* Microphone Button */}
           <button
             onClick={handleMicToggle}
-            disabled={isProcessing}
-            className={`relative group w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 overflow-hidden ${isRecording
-              ? 'bg-gradient-to-br from-red-500 to-red-600 shadow-2xl shadow-red-500/50 scale-110'
-              : 'bg-gradient-to-br from-purple-500 to-purple-700 shadow-2xl shadow-purple-500/50 hover:scale-105 hover:shadow-purple-400/60'
-              } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+            className={`p-4 rounded-full shadow-lg transition-all duration-300
+              ${isTranslationProcessing
+                ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                : isRecording
+                  ? 'bg-red-600 text-white shadow-lg shadow-red-500/40 animate-pulse'
+                  : 'bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white shadow-lg shadow-purple-500/40'
+              }`}
+            disabled={isTranslationProcessing}
           >
             <div className="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent rounded-full" />
 
@@ -444,25 +329,25 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
             {isRecording && (
               <>
                 <div
-                  className="absolute inset-0 rounded-full border-4 animate-pulse"
+                  className="absolute inset-0 rounded-full border-4 animate-pulse voice-wave-1"
                   style={{
-                    borderColor: `rgba(${Math.floor(147 + audioLevel)}, ${Math.floor(51 + audioLevel * 2)}, ${Math.floor(234 + audioLevel)}, 0.6)`,
-                    transform: `scale(${1 + audioLevel / 500})`
-                  }}
+                    '--wave-color-1': `rgba(${Math.floor(147 + audioLevel)}, ${Math.floor(51 + audioLevel * 2)}, ${Math.floor(234 + audioLevel)}, 0.6)`,
+                    '--wave-scale-1': `${1 + audioLevel / 500}`
+                  } as React.CSSProperties}
                 />
                 <div
-                  className="absolute inset-2 rounded-full border-2 animate-pulse"
+                  className="absolute inset-2 rounded-full border-2 animate-pulse voice-wave-2"
                   style={{
-                    borderColor: `rgba(${Math.floor(255 + audioLevel)}, ${Math.floor(215 - audioLevel)}, ${Math.floor(0 + audioLevel * 2)}, 0.4)`,
-                    transform: `scale(${1 + audioLevel / 300})`
-                  }}
+                    '--wave-color-2': `rgba(${Math.floor(255 + audioLevel)}, ${Math.floor(215 - audioLevel)}, ${Math.floor(0 + audioLevel * 2)}, 0.4)`,
+                    '--wave-scale-2': `${1 + audioLevel / 300}`
+                  } as React.CSSProperties}
                 />
                 <div
-                  className="absolute inset-4 rounded-full border-2 animate-pulse"
+                  className="absolute inset-4 rounded-full border-2 animate-pulse voice-wave-3"
                   style={{
-                    borderColor: `rgba(${Math.floor(168 + audioLevel * 2)}, ${Math.floor(85 + audioLevel)}, ${Math.floor(247)}, 0.8)`,
-                    transform: `scale(${1 + audioLevel / 200})`
-                  }}
+                    '--wave-color-3': `rgba(${Math.floor(168 + audioLevel * 2)}, ${Math.floor(85 + audioLevel)}, ${Math.floor(247)}, 0.8)`,
+                    '--wave-scale-3': `${1 + audioLevel / 200}`
+                  } as React.CSSProperties}
                 />
               </>
             )}
@@ -475,34 +360,33 @@ export const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
           </button>
 
           {/* Action Buttons */}
-          {translation && (
-            <div className="flex space-x-4">
-              <button
-                onClick={handleReRecord}
-                className="flex items-center space-x-2 bg-gray-800/80 hover:bg-gray-700/80 border border-gray-600/50 hover:border-gray-500/50 px-6 py-3 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl"
-              >
-                <RotateCcw className="h-5 w-5" />
-                <span>Re-record</span>
-              </button>
-
-              <button
-                onClick={handleSend}
-                className="flex items-center space-x-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 px-6 py-3 rounded-xl transition-all duration-300 shadow-lg shadow-purple-500/30 hover:shadow-purple-400/40"
-              >
-                <Send className="h-5 w-5" />
-                <span>{mode === 'solo' ? 'Play' : 'Send'}</span>
-              </button>
-            </div>
-          )}
+           {mode === 'host' && translation && (
+              <div className="flex space-x-4">
+                <button
+                  onClick={handleSend}
+                  className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-blue-500 text-white hover:bg-blue-600 transition-colors"
+                >
+                  <Send className="h-5 w-5" />
+                  <span>Send</span>
+                </button>
+                <button
+                  onClick={handleReRecord}
+                  className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-yellow-500 text-white hover:bg-yellow-600 transition-colors"
+                >
+                  <RotateCcw className="h-5 w-5" />
+                  <span>Re-record</span>
+                </button>
+              </div>
+            )}
 
           {/* Status */}
           <div className="text-center">
-            {isProcessing && (
+            {isTranslationProcessing && (
               <div className="flex items-center justify-center space-x-2">
                 <div className="animate-spin rounded-full h-4 w-4 border-2 border-purple-400 border-t-transparent" />
                 <span className="text-sm text-gray-400">Processing...</span>
               </div>
-            )}
+            )} 
 
             {isRecording && (
               <p className="text-sm text-red-400 animate-pulse drop-shadow-lg">
